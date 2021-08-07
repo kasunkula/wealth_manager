@@ -8,6 +8,12 @@ import pickle
 from colorama import init
 from termcolor import colored
 
+#  Control parameters
+ignore_on_behalf_investing = True
+mimic_real_timeline = True
+max_forecast_offsets = 1
+sgd_to_lkr_rate = 148
+
 account_statement_file_names = [r"C:\Users\kasun\Desktop\Account Statement Sep EOM.csv",
                                 r"C:\Users\kasun\Desktop\Account Statement.csv"]
 buy_trade_books = {}
@@ -37,23 +43,21 @@ market_prices = {  # EOY 2021
 market_prices = {}
 
 last_recorded_prices = None
-#  Control parameters
-ignore_on_behalf_investing = True
-max_forecast_offsets = 0
 
 #  Fund statistics
-portfolio_target = 27000000.0
-burrowed_money = 1100000.0  # from Ama 1000,000 + interest 100,000
+portfolio_target = 27000000.0 # EOY 2021 target
+burrowed_money = 1100000.0  # from Ama 1,000,000 + interest 100,000
 off_the_market_deposits = 2000000.00
 withdrawals = (2000000.0 + 1680000)
-duplicate_deposits = (400000)
+deposits_for_reinvesting_withdrawals = (400000 + 0)
 real_estate = 4250000.0
 lending = 100000.0
-sl_banks = (111004.0 + 2000000.0)
-sg_banks = 0.0
+sl_banks = (111004.0 + 2100000.0)
+sg_banks = 3000
+sg_stocks = 4435
 estimated_savings = 3600000
 on_behalf_deposits = 1100100.0  # (100100.00 + 1000000.00) for Nisala
-on_behalf_cash_balance = 0  # 543653.86  # 1228742.20
+on_behalf_cash_balance = 0
 on_behalf_dividends_reinvested = 105045.00  # for Nisala
 personal_dividends_reinvested = (245810.00 +  # SAMP
                                  15900.00 +  # JKH
@@ -95,8 +99,8 @@ off_market_trades = {
         "symbol": "PLC.N0000",
         "side": "B",
         "qty": 2692,
-        "price": 12.70,
-        "value": 34188.9,
+        "price": 0.0,
+        "value": 0.0,
     },
     3: {
         "symbol": "ASPH.R0000",
@@ -109,8 +113,8 @@ off_market_trades = {
         "symbol": "HNB.N0000",
         "side": "B",
         "qty": 481,
-        "price": 132,
-        "value": 63400,
+        "price": 0.0,
+        "value": 0.0,
     },
 }
 on_behalf_trades = {
@@ -157,7 +161,6 @@ on_behalf_trades = {
         "price": 140.00,
     },
 }
-
 splits = {
     "DIPD.N0000": {
         "date": "2021/02/16",
@@ -188,6 +191,10 @@ splits = {
         "ratio": 3
     },
     "LWL.N0000": {
+        "date": "2021/04/01",
+        "ratio": 5
+    },
+    "TILE.N0000": {
         "date": "2021/04/01",
         "ratio": 5
     },
@@ -254,7 +261,10 @@ class Position:
         current_price = get_valuation_price(self.symbol)
         self.forecast_sales_proceeds = get_sales_proceeds(self.qty, current_price)
         self.forecast_profit = round(self.forecast_sales_proceeds - self.cost, 2)
-        self.forecast_profit_percentage = round((self.forecast_profit / self.cost) * 100, 2)
+        if self.cost != 0.0:
+            self.forecast_profit_percentage = round((self.forecast_profit / self.cost) * 100, 2)
+        else:
+            self.forecast_profit_percentage = 100.0
         for offset in range(max_forecast_offsets):
             self.forecast_sale_prices[offset] = \
                 get_sale_price_for_expected_profit_percentage(self.cost, self.qty, offset)
@@ -369,6 +379,7 @@ def print_profits():
     total_profit = 0
     for symbol in realized_profits:
         profit_percentage = 0
+        realized_profits[symbol] = round(realized_profits[symbol], 2)
         if realized_profits[symbol] != 0.0:
             profit_percentage = round(realized_profits[symbol] * 100 / closed_position_costs[symbol], 2)
         if profit_percentage > 0.0:
@@ -399,10 +410,31 @@ def print_trades(symbol):
         print("====================================================")
 
 
-def compute_open_positions(symbol):
+def compute_open_positions(symbol, print_pos=True):
     profit = 0
     cost = 0
     sales_proceed = 0
+
+    if symbol not in buy_trade_books:
+        return
+
+    if mimic_real_timeline:
+        total_qty = 0
+        total_cost = 0
+
+        for buy_price, buy_trade in sorted(buy_trade_books[symbol].items()):
+            total_qty += buy_trade.qty
+            total_cost += buy_trade.cost
+
+        avg_price =0.0
+        if total_qty != 0.0:
+            avg_price = round(total_cost / total_qty, 2)
+
+        del buy_trade_books[symbol]
+        buy_trade_books[symbol] = {}
+        buy_trade_books[symbol][avg_price] = AggregatePosition(symbol, 0, avg_price)
+        buy_trade_books[symbol][avg_price].add_trade(total_qty, total_cost)
+
     for buy_price, buy_trade in sorted(buy_trade_books[symbol].items()):
         if symbol in sell_trade_books:
             for sell_price, sell_trade in reversed(sorted(sell_trade_books[symbol].items())):
@@ -415,14 +447,25 @@ def compute_open_positions(symbol):
                 if sell_trade.qty == 0:
                     sell_trade_books[symbol][sell_price] = None
                     del sell_trade_books[symbol][sell_price]
+                    if len(sell_trade_books[symbol]) == 0:
+                        del sell_trade_books[symbol]
                 if buy_trade.qty == 0:
                     buy_trade_books[symbol][buy_price] = None
                     del buy_trade_books[symbol][buy_price]
+                    if len(buy_trade_books[symbol]) == 0:
+                        del buy_trade_books[symbol]
                     break
-    realized_profits[symbol] = round(profit, 2)
-    closed_position_costs[symbol] = round(cost, 2)
-    closed_position_sales_proceeds[symbol] = round(sales_proceed, 2)
-    print_open_positions(symbol)
+    if symbol not in realized_profits:
+        realized_profits[symbol] = 0.0
+    realized_profits[symbol] += round(profit, 2)
+    if symbol not in closed_position_costs:
+        closed_position_costs[symbol] = 0.0
+    closed_position_costs[symbol] += round(cost, 2)
+    if symbol not in closed_position_sales_proceeds:
+        closed_position_sales_proceeds[symbol] = 0.0
+    closed_position_sales_proceeds[symbol] += round(sales_proceed, 2)
+    if print_pos:
+        print_open_positions(symbol)
 
 
 def get_non_on_behalf_trade_qty(symbol, side, price, qty, value):
@@ -444,7 +487,7 @@ def get_non_on_behalf_trade_qty(symbol, side, price, qty, value):
                 break
         if on_behalf_trade_key is not None and on_behalf_trades[on_behalf_trade_key]["qty"] == 0:
             del on_behalf_trades[on_behalf_trade_key]
-    if qty != non_onbehalf_trade_qty:
+    if qty != non_onbehalf_trade_qty and non_onbehalf_trade_value != 0:
         non_onbehalf_trade_value = round(value * (non_onbehalf_trade_qty / qty), 2)
     return non_onbehalf_trade_qty, non_onbehalf_trade_value
 
@@ -473,8 +516,8 @@ for file_name in account_statement_file_names:
             if record[1] == "B" or record[1] == "S" or record[1] == "BU" or record[1] == "SL":
                 total_trades += 1
                 symbol = ""
-                price = float(record[5].replace(',', ''))
                 qty = int(record[4].replace(',', ''))
+                price = float(record[5].replace(',', ''))
                 value = float(record[6].replace(',', ''))
                 total_turnover += abs(value)
                 current_cash_balance = float(record[7].replace(',', ''))
@@ -511,6 +554,8 @@ for file_name in account_statement_file_names:
                     if price not in sell_trade_books[symbol]:
                         sell_trade_books[symbol][price] = AggregatePosition(symbol, 0, price)
                     sell_trade_books[symbol][price].add_trade(qty, value)
+                    if mimic_real_timeline:
+                        compute_open_positions(symbol, False)
             elif record[1] == "R":
                 total_deposits += abs(float(record[6].replace(',', '')))
                 print("{2} - Deposits on the market {0} ({1})".
@@ -558,8 +603,8 @@ current_portfolio_total_cost = round(current_portfolio_total_cost, 2)
 print_profits()
 print("Total records {}. Total trades {}".format(total_records, total_trades))
 print("Total Deposits on the market {}".format(total_deposits))
-print("Reinvesting deposits of earlier withdrawals {}".format(duplicate_deposits))
-total_deposits -= duplicate_deposits # adjust the total deposits
+print("Reinvesting deposits of earlier withdrawals {}".format(deposits_for_reinvesting_withdrawals))
+total_deposits -= deposits_for_reinvesting_withdrawals # adjust the total deposits
 print("Adjusted total deposits on the market {}".format(total_deposits))
 print("Total Deposits off the market {}".format(off_the_market_deposits))
 
@@ -605,13 +650,15 @@ print("Investment Period  {0} - {1} to {2}".format(investment_period_in_days.day
 total_stock_portfolio = round(current_portfolio_total_sales_proceeds + cash_balance, 2)
 print("Total Stock portfolio value {0}".format(total_stock_portfolio))
 print("=======================================================")
-total_assets = round(total_stock_portfolio + real_estate + sl_banks + lending + sg_banks - burrowed_money, 2)
+sg_total_postfolio = round((sg_banks + sg_stocks)*sgd_to_lkr_rate, 2)
+total_assets = round(total_stock_portfolio + real_estate + sl_banks + lending - burrowed_money, 2)
 total_assets_estimate = round(total_assets + estimated_savings, 2)
 distance_to_target = round(portfolio_target - total_assets_estimate, 2)
 print("Real Estate assets {0}".format(real_estate))
 print("Cash at Bank SL {0}".format(sl_banks))
 print("Cash at Bank SG {0}".format(sg_banks))
 print("Lending {0}".format(lending))
+print("SG Portfolio {0}".format(sg_total_postfolio))
 print("Total Stock portfolio value {0}".format(total_stock_portfolio))
 print("Total Assets as of now {0}".format(total_assets))
 print("Distance to EOY Target {0}".format(distance_to_target))
