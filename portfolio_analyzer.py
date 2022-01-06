@@ -7,12 +7,13 @@ from prettytable import PrettyTable
 import pickle
 from colorama import init
 from termcolor import colored
+import yfinance as yf
 
 #  Control parameters
 ignore_on_behalf_investing = True
 mimic_real_timeline = True
 max_forecast_offsets = 1
-sgd_to_lkr_rate = 148
+sgd_to_lkr_rate = 140
 
 account_statement_file_names = [r"C:\Users\kasun\Desktop\Account Statement Sep EOM.csv",
                                 r"C:\Users\kasun\Desktop\Account Statement.csv"]
@@ -28,34 +29,34 @@ portfolio_summary = []
 current_portfolio_cost_by_symbol = {}
 current_portfolio_sales_proceeds_by_symbol = {}
 market_prices = {  # EOY 2021
-    "BIL.N0000": 10.00,
-    "BRWN.N0000": 250.00,
-    "DIPD.N0000": 80.00,
-    # "EXPO.N0000": 70.00,
-    "HAYC.N0000": 120.00,
-    "HNB.N0000": 160.00,
-    "JKH.N0000": 160.00,
-    "SAMP.N0000": 60.00,
-    "TKYO.X0000": 70.00,
-    "LFIN.X0000": 75.00,
+    # "BIL.N0000": 16.00,
+    # "EXPO.N0000": 300.00,
+    "HNB.N0000": 180.00,
+    "JKH.N0000": 180.00,
+    "SAMP.N0000": 70.00,
+    "TKYO.X0000": 60.00,
+    "LFIN.N0000": 80.00,
+    "KZOO.N0000": 15.00,
+    "LOFC.N0000": 35.00,
+    # "LOLC.N0000": 1000.00,
 }
 
 market_prices = {}
 
 last_recorded_prices = None
 
-#  Fund statistics
-portfolio_target = 27000000.0 # EOY 2021 target
+# ===========================================================================
+real_estate = 4450000.0
+lending = (0 + 111004.0)
+sl_banks = (2000000.0 + 0)
+sg_banks = (570.00 + 28000)  # in SGD
 burrowed_money = 1100000.0  # from Ama 1,000,000 + interest 100,000
+# ===========================================================================
+portfolio_target = 27000000.0  # EOY 2021 target
 off_the_market_deposits = 2000000.00
-withdrawals = (2000000.0 + 1680000)
+withdrawals = (2000000.0 + 1680000 + 600000)
 deposits_for_reinvesting_withdrawals = (400000 + 0)
-real_estate = 4250000.0
-lending = 100000.0
-sl_banks = (111004.0 + 2100000.0)
-sg_banks = 3000
-sg_stocks = 4435
-estimated_savings = 3600000
+estimated_savings = 0
 on_behalf_deposits = 1100100.0  # (100100.00 + 1000000.00) for Nisala
 on_behalf_cash_balance = 0
 on_behalf_dividends_reinvested = 105045.00  # for Nisala
@@ -86,7 +87,38 @@ personal_dividends_reinvested = (245810.00 +  # SAMP
                                  22252.23 +  # ??
                                  5875.00 +  # ??
                                  129525)  # SAMP
-
+sgx_portfolio = {
+    1: {
+        "symbol": "S68.SI",
+        "qty": 500,
+    },
+    2: {
+        "symbol": "BN4.SI",
+        "qty": 1300,
+    },
+}
+trading_portfolio = {
+    1: {
+        "symbol": "KZOO.N0000",
+        "qty": 100000,
+    },
+    2: {
+        "symbol": "LOFC.N0000",
+        "qty": 50000,
+    },
+   3: {
+        "symbol": "ASCO.N0000",
+        "qty": 25000,
+    },
+   4: {
+        "symbol": "ECL.N0000",
+        "qty": 20000,
+    },
+    5: {
+        "symbol": "BRWN.N0000",
+        "qty": 2000,
+    }
+}
 off_market_trades = {
     1: {
         "symbol": "ASPH.N0000",
@@ -115,6 +147,13 @@ off_market_trades = {
         "qty": 481,
         "price": 0.0,
         "value": 0.0,
+    },
+    5: {
+        "symbol": "HBS.N0000",
+        "side": "B",
+        "qty": 4100,
+        "price": 12.5,
+        "value": 51250.0,
     },
 }
 on_behalf_trades = {
@@ -210,6 +249,9 @@ splits = {
 
 
 def get_current_market_price(counter):
+    yahoo_price = get_sl_market_price_from_yahoo(counter)
+    if yahoo_price != -1:
+        return yahoo_price
     response = requests.request("GET", 'https://sl-codes.herokuapp.com/lk/stocks/v1', params={'companySymbol': counter})
     if response.status_code == 200:
         res_dict = json.loads(response.text)
@@ -220,6 +262,40 @@ def get_current_market_price(counter):
     else:
         print("Failed to retrieve last traded price for {0}".format(counter))
         exit(1)
+
+
+def get_sl_market_price_from_yahoo(counter):
+    try:
+        formatted_symbol = '{}.CM'.format(counter.replace('.', ''))
+        counter = yf.Ticker(formatted_symbol)
+        price_data = counter.history()
+        last_quote = (price_data.tail(1)['Close'].iloc[0])
+        return round(last_quote, 2)
+    except:
+        return -1
+
+
+def get_sgx_market_price(symbol):
+    counter = yf.Ticker(symbol)
+    price_data = counter.history()
+    last_quote = (price_data.tail(1)['Close'].iloc[0])
+    return round(last_quote, 2)
+
+
+def value_sg_portfolio():
+    portfolio_value = 0.0
+    for position in sgx_portfolio.values():
+        last_traded_price = get_sgx_market_price(position["symbol"])
+        portfolio_value += last_traded_price * position["qty"]
+    return round(portfolio_value, 2)
+
+
+def value_trading_portfolio():
+    portfolio_value = 0.0
+    for position in trading_portfolio.values():
+        last_traded_price = get_current_market_price(position["symbol"])
+        portfolio_value += get_sales_proceeds(last_traded_price, position["qty"])
+    return round(portfolio_value, 2)
 
 
 def get_valuation_price(counter):
@@ -301,7 +377,9 @@ def print_open_positions(symbol):
     if symbol in buy_trade_books and len(buy_trade_books[symbol]) != 0:
         valuation_price = get_valuation_price(symbol)
         current_market_price = get_current_market_price(symbol)
-        distance_to_valuation = round(((valuation_price - current_market_price) * 100 / current_market_price), 0)
+        distance_to_valuation = 0.0
+        if current_market_price != 0.0:
+            distance_to_valuation = round(((valuation_price - current_market_price) * 100 / current_market_price), 0)
 
         pretty_table = PrettyTable()
         table_header = [symbol, "Qty", "Original Qty", "Price", "Cost",
@@ -377,7 +455,7 @@ def print_profits():
     print("=========== Materialized Profits ======================")
     print("=======================================================")
     total_profit = 0
-    for symbol in realized_profits:
+    for symbol in sorted(realized_profits):
         profit_percentage = 0
         realized_profits[symbol] = round(realized_profits[symbol], 2)
         if realized_profits[symbol] != 0.0:
@@ -426,7 +504,7 @@ def compute_open_positions(symbol, print_pos=True):
             total_qty += buy_trade.qty
             total_cost += buy_trade.cost
 
-        avg_price =0.0
+        avg_price = 0.0
         if total_qty != 0.0:
             avg_price = round(total_cost / total_qty, 2)
 
@@ -574,19 +652,13 @@ for file_name in account_statement_file_names:
 print("{} - off the market deposits {} ({})".
       format('N/A', off_the_market_deposits, off_the_market_deposits + total_deposits - total_withdrawals, ))
 
-print("{} - capital excluding dividends {} ({})".
-      format('N/A', personal_dividends_reinvested, off_the_market_deposits
-             + total_deposits - total_withdrawals - personal_dividends_reinvested))
-
-print("Total Deposits on and off the market - {}".format(off_the_market_deposits + total_deposits))
-
 for trade in off_market_trades.values():
     qty, value = get_non_on_behalf_trade_qty(trade["symbol"], "B", trade["price"], trade["qty"], trade["value"])
     if qty <= 0:
         continue
     if trade["symbol"] not in buy_trade_books:
         buy_trade_books[trade["symbol"]] = {}
-    if price not in buy_trade_books[trade["symbol"]]:
+    if trade["price"] not in buy_trade_books[trade["symbol"]]:
         buy_trade_books[trade["symbol"]][trade["price"]] = AggregatePosition(trade["symbol"], 0, trade["price"])
     buy_trade_books[trade["symbol"]][trade["price"]].add_trade(qty, value)
 
@@ -601,13 +673,13 @@ for symbol in sorted(buy_trade_books):
 current_portfolio_total_sales_proceeds = round(current_portfolio_total_sales_proceeds, 2)
 current_portfolio_total_cost = round(current_portfolio_total_cost, 2)
 print_profits()
-print("Total records {}. Total trades {}".format(total_records, total_trades))
+print("Total records scanned {}. Total trades {}".format(total_records, total_trades))
 print("Total Deposits on the market {}".format(total_deposits))
 print("Reinvesting deposits of earlier withdrawals {}".format(deposits_for_reinvesting_withdrawals))
-total_deposits -= deposits_for_reinvesting_withdrawals # adjust the total deposits
+total_deposits -= deposits_for_reinvesting_withdrawals  # adjust the total deposits
 print("Adjusted total deposits on the market {}".format(total_deposits))
 print("Total Deposits off the market {}".format(off_the_market_deposits))
-
+print("Total deposited capital".format(total_deposits + off_the_market_deposits))
 
 if ignore_on_behalf_investing:
     total_deposited_capital_in_the_market = total_deposits - \
@@ -615,15 +687,14 @@ if ignore_on_behalf_investing:
                                              on_behalf_dividends_reinvested)
     total_deposited_capital = total_deposited_capital_in_the_market + off_the_market_deposits
     total_dividends_reinvested = personal_dividends_reinvested
-    print("Total dividends reinvested {}".format(total_dividends_reinvested))
     print("Total on-behalf deposits {}".format(on_behalf_deposits + on_behalf_dividends_reinvested))
 else:
     total_deposited_capital_in_the_market = total_deposits - \
                                             (personal_dividends_reinvested + on_behalf_dividends_reinvested)
     total_deposited_capital = total_deposited_capital_in_the_market + off_the_market_deposits
     total_dividends_reinvested = personal_dividends_reinvested + on_behalf_dividends_reinvested
-    print("Total dividends reinvested {}".format(total_dividends_reinvested))
 
+print("Total dividends reinvested {}".format(total_dividends_reinvested))
 print("Total deposited capital excluding dividend reinvesting deposits {}".format(total_deposited_capital))
 
 cash_balance = round(-1 * current_cash_balance, 2)
@@ -633,43 +704,59 @@ print("Cash balance {}".format(cash_balance))
 print("Total Withdrawals {}".format(withdrawals))
 total_invested_capital = round(total_deposited_capital - cash_balance, 2)
 print("Total turn over (all time) {}".format(round(total_turnover, 2)))
-print("Total invested capital (all time) {}".format(total_invested_capital))
+# print("Total invested capital (all time) {}".format(total_invested_capital))
+print("=======================================================")
 print("Total invested capital (current) {}".format(round(total_invested_capital - withdrawals), 2))
 print("Current portfolio valuation {}".format(current_portfolio_total_sales_proceeds))
 current_profit_perc = \
     round((current_portfolio_total_sales_proceeds + cash_balance + withdrawals - total_deposited_capital) * 100 /
           total_deposited_capital, 2)
 total_gain = round((current_portfolio_total_sales_proceeds + cash_balance + withdrawals) - total_deposited_capital, 2)
-print("=======================================================")
 print("Total gain to date {0} ({1}%)".format(total_gain, current_profit_perc))
 
 investment_period_in_days = investment_end_date - investment_start_date
 print("Investment Period  {0} - {1} to {2}".format(investment_period_in_days.days,
                                                    investment_start_date.strftime("%Y/%m/%d"),
                                                    investment_end_date.strftime("%Y/%m/%d")))
-total_stock_portfolio = round(current_portfolio_total_sales_proceeds + cash_balance, 2)
+total_stock_portfolio = round(current_portfolio_total_sales_proceeds + cash_balance, 0)
 print("Total Stock portfolio value {0}".format(total_stock_portfolio))
 print("=======================================================")
-sg_total_postfolio = round((sg_banks + sg_stocks)*sgd_to_lkr_rate, 2)
-total_assets = round(total_stock_portfolio + real_estate + sl_banks + lending - burrowed_money, 2)
-total_assets_estimate = round(total_assets + estimated_savings, 2)
-distance_to_target = round(portfolio_target - total_assets_estimate, 2)
-print("Real Estate assets {0}".format(real_estate))
-print("Cash at Bank SL {0}".format(sl_banks))
-print("Cash at Bank SG {0}".format(sg_banks))
-print("Lending {0}".format(lending))
-print("SG Portfolio {0}".format(sg_total_postfolio))
-print("Total Stock portfolio value {0}".format(total_stock_portfolio))
-print("Total Assets as of now {0}".format(total_assets))
-print("Distance to EOY Target {0}".format(distance_to_target))
+sg_stock_portfolio_valuation = value_sg_portfolio()
+sg_total_postfolio = round((sg_banks + sg_stock_portfolio_valuation) * sgd_to_lkr_rate, 0)
+total_liquid_assets = round(total_stock_portfolio + sl_banks + lending - burrowed_money, 0)
+total_assets = round(total_stock_portfolio + real_estate + sl_banks + lending - burrowed_money, 0)
+total_assets_estimate = round(total_assets + estimated_savings + sg_total_postfolio, 0)
+distance_to_target = round(portfolio_target - total_assets_estimate, 0)
+
 print("=======================================================")
-print("Total Estimated EOY Assets with savings {0}".format(total_assets_estimate))
+print("Real Estate {:,}".format(real_estate))
+print("Cash at Bank SL {:,}".format(sl_banks))
+print("Cash at Bank SG {:,} (SGD {:,})".format(round(sg_banks * sgd_to_lkr_rate, 2), sg_banks))
+print("Lending {:,}".format(lending))
+print("Total Stock portfolio value SL {:,}".format(total_stock_portfolio))
+print("Total Stock portfolio value SG {:,} (SGD {:,})".format(round(sg_stock_portfolio_valuation * sgd_to_lkr_rate, 2),
+                                                              sg_stock_portfolio_valuation))
+print("Burrowing -{:,}".format(burrowed_money))
+print("Total Liquid Assets as of now LK {:,}".format(total_liquid_assets))
+print("Total Liquid Assets as of now SG {:,}".format(sg_total_postfolio))
+print("Total Liquid Assets as of now {:,}".format(total_liquid_assets + sg_total_postfolio))
+print("Total Assets as of now LK {:,}".format(total_assets))
+print("Total Assets as of now SG {:,}".format(sg_total_postfolio))
+
+print("Total Assets as of now {:,}".format(total_assets + sg_total_postfolio))
+# print("Distance to EOY Target {:,}".format(distance_to_target))
 print("=======================================================")
 
-# summary_table = PrettyTable()
-# summary_table.field_names = ["Symbol", "Qty", "Cost", "Sales Proceeds", "Profit"]
-# for row in portfolio_summary:
-#     summary_table.add_row(row)
-# print(summary_table)
+trading_portfolio_value = value_trading_portfolio()
+
+print("Trading Portfolio Value {:,}".format(trading_portfolio_value))
+print("Cash at Hand {:,}".format(round((sl_banks + cash_balance), 0)))
+print("Total Cash at hand (% of total SL portfolio value) {:,} ({})%".
+      format(round((sl_banks + cash_balance + trading_portfolio_value), 0),
+             round((sl_banks + cash_balance + trading_portfolio_value) * 100 / total_stock_portfolio, 2)))
+
+print("=======================================================")
+print("Total Estimated EOY Assets {:,}".format(total_assets_estimate))
+print("=======================================================")
 
 pickle.dump(market_prices, open("market_prices.pckl", "wb"))
