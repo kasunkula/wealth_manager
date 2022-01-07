@@ -1,10 +1,6 @@
 #!/usr/bin/python3
-import base64
-import json
 import os
 import traceback
-
-from botocore.exceptions import ClientError
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver import ActionChains
@@ -13,18 +9,12 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from datetime import datetime
+from webdriver_manager.chrome import ChromeDriverManager
 import time
-import boto3
 import csv
 
 all_trades = []
-working_dir = r'/tmp'
 working_dir = r'C:\Users\kasun\Desktop\daily_trades'
-s3_bucket_name = 'atrad-daily-trades'
-SENDER = "ATRAD TRADE SCRAPER <kasunkula@gmail.com>"
-RECIPIENT = "kasunkula@gmail.com"
-AWS_REGION = "ap-southeast-1"
-secret_name = "atrad_pwd"
 log_file_name = "trade_scraper_{}.log".format(datetime.now().strftime('%Y%m%d%H%M%S'))
 abs_log_file_name = os.path.join(working_dir, log_file_name)
 
@@ -46,58 +36,16 @@ def log(log_str, log_prefix=None):
     return
 
 
-def send_status_email(subject, description):
-    ses_client = boto3.client('ses', region_name=AWS_REGION)
-    try:
-        ses_client.send_email(
-            Destination={
-                'ToAddresses': [
-                    RECIPIENT,
-                ],
-            },
-            Message={
-                'Body': {
-                    'Text': {
-                        'Charset': "UTF-8",
-                        'Data': description,
-                    },
-                },
-                'Subject': {
-                    'Charset': "UTF-8",
-                    'Data': subject,
-                },
-            },
-            Source=SENDER,
-        )
-    except ClientError as e:
-        log_error(e.response['Error']['Message'])
-    else:
-        log("Status Email sent!"),
-
-
 start = time.time()
 try:
     # instantiate a chrome options object so you can set the size and headless preference
     chrome_options = Options()
-    # chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--headless")
     chrome_options.add_argument("--window-size=1920x1080")
 
     log("Navigating to atrad login page")
-    session = boto3.session.Session()
-    client = session.client(
-        service_name='secretsmanager',
-        region_name=AWS_REGION
-    )
 
-    get_secret_value_response = client.get_secret_value(
-        SecretId=secret_name
-    )
-
-    if 'SecretString' in get_secret_value_response:
-        secret = json.loads(get_secret_value_response['SecretString'])
-        secret = secret[secret_name]
-
-    driver = webdriver.Chrome(options=chrome_options)
+    driver = webdriver.Chrome(ChromeDriverManager().install(), options=chrome_options)
     driver.get("https://online2.cts1.lk/atsweb/login")
 
     WebDriverWait(driver, 10).until(lambda driver: driver.execute_script('return document.readyState') == 'complete')
@@ -115,7 +63,7 @@ try:
         "/div[@class='dijitReset dijitInputField dijitInputContainer']/input[@id='txtPassword']")
 
     username_text_box.send_keys("kasuncham")
-    password_text_box.send_keys(secret)
+    password_text_box.send_keys("D2p9HNDe@GwiXPJ")
 
     actions = ActionChains(driver)
     actions.send_keys(Keys.TAB * 2)
@@ -129,15 +77,19 @@ try:
     login_button = driver.find_element_by_id("btnSubmit_label")
     login_button.click()
 
-    WebDriverWait(driver, 60).until(EC.presence_of_element_located((By.ID, 'dijit_PopupMenuBarItem_2_text')))
+    WebDriverWait(driver, 60).until(EC.presence_of_element_located((By.ID, 'dijit_PopupMenuBarItem_1_text')))
     log("logged in to atrad system")
 
     WebDriverWait(driver, 60).until(EC.presence_of_element_located((By.ID, 'totTrades3')))
+    for x in range(6):
+        tot_trades_element_text = driver.find_element_by_id("totTrades3").text
+        log("Checking for total trades element text [{}]".format(tot_trades_element_text))
+        if tot_trades_element_text != '':
+            break
+        time.sleep(10)
+
     total_trades = int(driver.find_element_by_id("totTrades3").text.replace(',', ''))
     log("total trades to be scraped {}".format(total_trades))
-
-    market_drop_down = driver.find_element_by_id("dijit_PopupMenuBarItem_2_text")
-    driver.execute_script("arguments[0].click();", market_drop_down)
 
     WebDriverWait(driver, 60).until(EC.presence_of_element_located((By.ID, 'dijit_MenuItem_13_text')))
     trade_summary_element = driver.find_element_by_id("dijit_MenuItem_13_text")
@@ -165,8 +117,8 @@ try:
                     trade.append(item.text)
                 col_index += 1
             all_trades.append(trade)
-            if len(all_trades) % 100 == 0:
-                print("[Page {} of {}] Trades scraped so far {}".format(current_page_no, no_of_pages, len(all_trades)))
+            if len(all_trades) % 500 == 0:
+                log("[Page {} of {}] Trades scraped so far {}".format(current_page_no, no_of_pages, len(all_trades)))
         next_button = driver.find_element_by_id("btnNextPageBut")
         if not next_button.is_displayed():
             break
@@ -185,12 +137,9 @@ finally:
         trade_file_name = "trades_{}.csv".format(datetime.now().strftime('%Y%m%d%H%M%S'))
         log("Only {} pages scraped out of {} total pages".format(int_current_page_no, no_of_pages))
         log("Only {} trades scraped out of {} total trades".format(len(all_trades), total_trades))
-        email_subject = 'Failed - {} trades scraped from {} pages out of {}'.format(len(all_trades),
-                                                                                    int_current_page_no, no_of_pages)
     else:
         trade_file_name = "trades_{}.csv".format(datetime.now().strftime('%Y%m%d'))
         log("All {} pages scraped out of {} total pages".format(int_current_page_no, no_of_pages))
-        email_subject = 'Success - All {} trades scraped from {} pages'.format(len(all_trades), no_of_pages)
     log("{} trades scraped".format(len(all_trades)))
 
     abs_trade_file_name = os.path.join(working_dir, trade_file_name)
@@ -203,16 +152,3 @@ finally:
     desc = "Total trades scraped {0}. Elapsed time {1}min".format(len(all_trades), round((end - start) / 60), 0)
     log(desc)
     driver.close()
-
-    s3_client = boto3.client('s3')
-    response = s3_client.upload_file(abs_trade_file_name, s3_bucket_name, trade_file_name)
-
-    with open(abs_log_file_name, 'r') as file:
-        log_file_data = file.read()
-    send_status_email(email_subject, log_file_data)
-    os.remove(abs_trade_file_name)
-    os.remove(abs_log_file_name)
-
-    ec2 = boto3.client('ec2', region_name='ap-southeast-1')
-    ec2.stop_instances(InstanceIds=['i-087d9efa4f2600a19'])
-    log('stopped instances : ' + str('i-087d9efa4f2600a19'))
