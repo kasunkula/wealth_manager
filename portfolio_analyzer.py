@@ -106,11 +106,11 @@ trading_portfolio = {
         "symbol": "LOFC.N0000",
         "qty": 50000,
     },
-   3: {
+    3: {
         "symbol": "ASCO.N0000",
         "qty": 25000,
     },
-   4: {
+    4: {
         "symbol": "ECL.N0000",
         "qty": 20000,
     },
