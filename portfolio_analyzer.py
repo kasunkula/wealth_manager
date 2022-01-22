@@ -19,26 +19,29 @@ account_statement_file_names = [r"C:\Users\kasun\Desktop\Account Statement Sep E
                                 r"C:\Users\kasun\Desktop\Account Statement.csv"]
 buy_trade_books = {}
 sell_trade_books = {}
-sales_commission_percentage = 1.12
+trade_commission_percentage = 1.12
 
 realized_profits = {}
 closed_position_costs = {}
 closed_position_sales_proceeds = {}
 portfolio_summary = []
-
 current_portfolio_cost_by_symbol = {}
 current_portfolio_sales_proceeds_by_symbol = {}
-market_prices = {  # EOY 2021
-    # "BIL.N0000": 16.00,
-    # "EXPO.N0000": 300.00,
+
+market_prices = {  # EOY 2022
+    "ASCO.N0000": 40.00,
+    "BIL.N0000": 25.00,
+    "BRWN.N0000": 600.00,
+    "EXPO.N0000": 500.00,
+    "ECL.N0000": 45.00,
     "HNB.N0000": 180.00,
     "JKH.N0000": 180.00,
+    "KZOO.N0000": 25.00,
+    "LFIN.N0000": 100.00,
+    "LOFC.N0000": 50.00,
+    "LOLC.N0000": 1600.00,
     "SAMP.N0000": 70.00,
     "TKYO.X0000": 60.00,
-    "LFIN.N0000": 80.00,
-    "KZOO.N0000": 15.00,
-    "LOFC.N0000": 35.00,
-    # "LOLC.N0000": 1000.00,
 }
 
 market_prices = {}
@@ -48,15 +51,15 @@ last_recorded_prices = None
 # ===========================================================================
 real_estate = 4450000.0
 lending = (0 + 111004.0)
-sl_banks = (2000000.0 + 0)
-sg_banks = (570.00 + 28000)  # in SGD
+sl_banks = (2500000.0 + 0)
+sg_banks = (570.00 + 27000)  # in SGD
 burrowed_money = 1100000.0  # from Ama 1,000,000 + interest 100,000
 # ===========================================================================
 portfolio_target = 27000000.0  # EOY 2021 target
 off_the_market_deposits = 2000000.00
 withdrawals = (2000000.0 + 1680000 + 600000)
 deposits_for_reinvesting_withdrawals = (400000 + 0)
-estimated_savings = 0
+estimated_future_savings = 4500000
 on_behalf_deposits = 1100100.0  # (100100.00 + 1000000.00) for Nisala
 on_behalf_cash_balance = 0
 on_behalf_dividends_reinvested = 105045.00  # for Nisala
@@ -100,7 +103,7 @@ sgx_portfolio = {
 trading_portfolio = {
     1: {
         "symbol": "KZOO.N0000",
-        "qty": 100000,
+        "qty": 80000,
     },
     2: {
         "symbol": "LOFC.N0000",
@@ -112,13 +115,14 @@ trading_portfolio = {
     },
     4: {
         "symbol": "ECL.N0000",
-        "qty": 20000,
+        "qty": 19200,
     },
     5: {
         "symbol": "BRWN.N0000",
         "qty": 2000,
     }
 }
+
 off_market_trades = {
     1: {
         "symbol": "ASPH.N0000",
@@ -156,6 +160,7 @@ off_market_trades = {
         "value": 51250.0,
     },
 }
+
 on_behalf_trades = {
     1: {
         "symbol": "SAMP.N0000",
@@ -200,6 +205,7 @@ on_behalf_trades = {
         "price": 140.00,
     },
 }
+
 splits = {
     "DIPD.N0000": {
         "date": "2021/02/16",
@@ -307,11 +313,11 @@ def get_valuation_price(counter):
 
 
 def get_cost(qty, price):
-    return round(qty * price * (1 + (sales_commission_percentage / 100)), 2)
+    return round(qty * price * (1 + (trade_commission_percentage / 100)), 2)
 
 
 def get_sales_proceeds(qty, price):
-    return round(qty * price * (1 - (sales_commission_percentage / 100)), 2)
+    return round(qty * price * (1 - (trade_commission_percentage / 100)), 2)
 
 
 def get_sale_price_for_expected_profit_percentage(cost, qty, profit_percentage):
@@ -722,10 +728,11 @@ total_stock_portfolio = round(current_portfolio_total_sales_proceeds + cash_bala
 print("Total Stock portfolio value {0}".format(total_stock_portfolio))
 print("=======================================================")
 sg_stock_portfolio_valuation = value_sg_portfolio()
-sg_total_postfolio = round((sg_banks + sg_stock_portfolio_valuation) * sgd_to_lkr_rate, 0)
-total_liquid_assets = round(total_stock_portfolio + sl_banks + lending - burrowed_money, 0)
-total_assets = round(total_stock_portfolio + real_estate + sl_banks + lending - burrowed_money, 0)
-total_assets_estimate = round(total_assets + estimated_savings + sg_total_postfolio, 0)
+sg_total_portfolio = round((sg_banks + sg_stock_portfolio_valuation) * sgd_to_lkr_rate, 0)
+total_liquid_assets_sl = round(total_stock_portfolio + sl_banks + lending - burrowed_money, 0)
+total_assets_sl = round(total_stock_portfolio + real_estate + sl_banks + lending - burrowed_money, 0)
+total_assets_estimate = round(total_assets_sl + estimated_future_savings + sg_total_portfolio, 0)
+total_liquid_assets_estimate = round(total_liquid_assets_sl + estimated_future_savings + sg_total_portfolio, 0)
 distance_to_target = round(portfolio_target - total_assets_estimate, 0)
 
 print("=======================================================")
@@ -733,17 +740,18 @@ print("Real Estate {:,}".format(real_estate))
 print("Cash at Bank SL {:,}".format(sl_banks))
 print("Cash at Bank SG {:,} (SGD {:,})".format(round(sg_banks * sgd_to_lkr_rate, 2), sg_banks))
 print("Lending {:,}".format(lending))
-print("Total Stock portfolio value SL {:,}".format(total_stock_portfolio))
+print("Cash balance in CDS {}".format(cash_balance))
+print("Total Stock portfolio value SL {:,}".format(current_portfolio_total_sales_proceeds))
 print("Total Stock portfolio value SG {:,} (SGD {:,})".format(round(sg_stock_portfolio_valuation * sgd_to_lkr_rate, 2),
                                                               sg_stock_portfolio_valuation))
 print("Burrowing -{:,}".format(burrowed_money))
-print("Total Liquid Assets as of now LK {:,}".format(total_liquid_assets))
-print("Total Liquid Assets as of now SG {:,}".format(sg_total_postfolio))
-print("Total Liquid Assets as of now {:,}".format(total_liquid_assets + sg_total_postfolio))
-print("Total Assets as of now LK {:,}".format(total_assets))
-print("Total Assets as of now SG {:,}".format(sg_total_postfolio))
+print("Total Liquid Assets as of now LK {:,}".format(total_liquid_assets_sl))
+print("Total Liquid Assets as of now SG {:,}".format(sg_total_portfolio))
+print("Total Liquid Assets as of now {:,}".format(total_liquid_assets_sl + sg_total_portfolio))
+print("Total Assets as of now LK {:,}".format(total_assets_sl))
+print("Total Assets as of now SG {:,}".format(sg_total_portfolio))
 
-print("Total Assets as of now {:,}".format(total_assets + sg_total_postfolio))
+print("Total Assets as of now {:,}".format(total_assets_sl + sg_total_portfolio))
 # print("Distance to EOY Target {:,}".format(distance_to_target))
 print("=======================================================")
 
@@ -757,6 +765,7 @@ print("Total Cash at hand (% of total SL portfolio value) {:,} ({})%".
 
 print("=======================================================")
 print("Total Estimated EOY Assets {:,}".format(total_assets_estimate))
+print("Total Estimated EOY Liquid Assets {:,}".format(total_liquid_assets_estimate))
 print("=======================================================")
 
 pickle.dump(market_prices, open("market_prices.pckl", "wb"))
