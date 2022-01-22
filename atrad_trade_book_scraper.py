@@ -13,6 +13,7 @@ from datetime import datetime
 from webdriver_manager.chrome import ChromeDriverManager
 import time
 import csv
+import keyring
 
 working_dir = r'C:\Users\kasun\Desktop\daily_trades'
 log_file_name = "trade_scraper_{}.log".format(datetime.now().strftime('%Y%m%d%H%M%S'))
@@ -65,7 +66,7 @@ def log_in_to_atrad():
             "/div[@class='dijitReset dijitInputField dijitInputContainer']/input[@id='txtPassword']")
 
         username_text_box.send_keys("kasuncham")
-        password_text_box.send_keys("D2p9HNDe@GwiXPJ")
+        password_text_box.send_keys(keyring.get_password("atrad", "murapade"))
 
         actions = ActionChains(driver)
         actions.send_keys(Keys.TAB * 2)
