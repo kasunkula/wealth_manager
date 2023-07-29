@@ -15,11 +15,12 @@ from pandas_datareader import data as pdr
 ignore_on_behalf_investing = True
 mimic_real_timeline = True
 max_forecast_offsets = 1
-sgd_to_lkr_rate = 250
-usd_to_lkr_rate = 350
+sgd_to_lkr_rate = 0
+usd_to_lkr_rate = 0
 
-account_statement_file_names = [r"C:\Users\kasun\Google Drive\Documents\Finances\Portfolio Manager\Account Statement Sep EOM.csv",
-                                r"C:\Users\kasun\Google Drive\Documents\Finances\Portfolio Manager\Account Statement.csv"]
+account_statement_file_names = [
+    r"C:\Users\kasun\Google Drive\Documents\Finances\Portfolio Manager\Account Statement Sep EOM.csv",
+    r"C:\Users\kasun\Google Drive\Documents\Finances\Portfolio Manager\Account Statement.csv"]
 
 buy_trade_books = {}
 sell_trade_books = {}
@@ -36,9 +37,16 @@ last_recorded_prices = None
 # ===========================================================================
 real_estate_investment = 4950000.0
 lending = (0 + 0.0)
-sl_banks = (0 + 500000)
-sg_banks = (570.00 + 70000)  # in SGD
-burrowing = 1100000.0  # from Ama 1,000,000 + interest 100,000
+sl_banks = (0 + 0)
+sg_banks = (4561.00 +  # poems
+            11.98 +  # gemini
+            75000.00 +  # dbs
+            0 +  # lending
+            8844.53 +  # Fidelity - current balance on 26 June 2023
+            (1114) +  # Fidelity - June
+            - 0  # sc cc loan
+            )  # in SGD
+burrowing = 0  # 1100000.0  # from Ama 1,000,000 + interest 100,000
 # ===========================================================================
 portfolio_target = 30000000.0  # EOY 2022 target
 off_the_market_deposits = 2000000.00
@@ -108,12 +116,15 @@ def convert_symbol_to_yahoo_format(symbol):
     return '{}.CM'.format(symbol.replace('.', ''))
 
 
-def preload_prices(counters, convert_symbol=False):
+def preload_prices(counters, convert_symbol, curr):
+    if curr is None:
+        curr = "LKR"
     for counter in counters:
-        price, currency = get_last_traded_price(convert_symbol_to_yahoo_format(counter) if convert_symbol else counter)
+        price, currency = \
+            get_last_traded_price(convert_symbol_to_yahoo_format(counter) if convert_symbol else counter, curr)
         recent_price_cache[counter] = {
             "price": price,
-            "currency": counter
+            "currency": curr
         }
 
 
@@ -135,16 +146,23 @@ def get_cse_last_traded_price(counter):
         exit(1)
 
 
-def get_last_traded_price(symbol):
+def get_last_traded_price(symbol, currency=None):
     if symbol in recent_price_cache:
         return recent_price_cache[symbol]["price"], recent_price_cache[symbol]["currency"]
     yf.pdr_override()
-    df = pdr.get_data_yahoo(symbol)
+    today = datetime.date.today()
+    start_date = (today - datetime.timedelta(days=5)).strftime("%Y-%m-%d")
+    end_date = today.strftime("%Y-%m-%d")
+    print("get_data_yahoo from {0} to {1} for {2}".format(start_date, end_date, symbol))
+    df = pdr.get_data_yahoo(symbol, start=start_date, end=end_date, period='1d')
+
     if not df.empty:
-        dq = pdr.get_quote_yahoo([symbol])
-        return round(df.tail(1)['Close'][0], 2), dq.tail(1)['currency'][0]
-    else:
-        return 0, None
+        if currency is None:
+            dq = pdr.get_quote_yahoo([symbol])
+            currency = dq.tail(1)['currency'][0]
+        print("Price read from Yahoo for {0} : {1} {2}".format(symbol, round(df.tail(1)['Close'][0], 2), currency))
+        return round(df.tail(1)['Close'][0], 2), currency
+    return 0, None
 
 
 def value_sg_portfolio():
@@ -477,7 +495,7 @@ def analyse_portfolio():
 
     current_portfolio_total_sales_proceeds = 0
     current_portfolio_total_cost = 0
-    preload_prices(buy_trade_books.keys(), True)
+    preload_prices(list(buy_trade_books.keys()), True, "LKR")
     for symbol in sorted(buy_trade_books):
         compute_open_positions(symbol)
         if symbol in current_portfolio_sales_proceeds_by_symbol:
@@ -538,6 +556,8 @@ def analyse_portfolio():
     print("=======================================================")
     sg_stock_portfolio_valuation = value_sg_portfolio()
     crypto_portfolio_valuation = value_crypto_portfolio()
+    sg_total_portfolio_in_sgd = \
+        round(sg_banks + sg_stock_portfolio_valuation + crypto_portfolio_valuation * usd_to_sgd_rate, 0)
     sg_total_portfolio = round((sg_banks + sg_stock_portfolio_valuation) * sgd_to_lkr_rate
                                + crypto_portfolio_valuation * usd_to_lkr_rate, 0)
     total_liquid_assets_sl = round(total_stock_portfolio + sl_banks + lending - burrowing, 0)
@@ -550,15 +570,17 @@ def analyse_portfolio():
     print("Cash at Bank SL {:,}".format(sl_banks))
     print("Cash at Bank SG {:,} (SGD {:,})".format(round(sg_banks * sgd_to_lkr_rate, 2), sg_banks))
     print("Cash balance in CDS {}".format(cash_balance))
-    print("Total Stock portfolio value SL {:,}".format(current_portfolio_total_sales_proceeds))
+    print("Total Stock portfolio value SL {:,} (SGD {:,})".format(current_portfolio_total_sales_proceeds, round(
+        current_portfolio_total_sales_proceeds / sgd_to_lkr_rate, 2)))
     print("Total Stock portfolio value SG {:,} (SGD {:,})".
           format(round(sg_stock_portfolio_valuation * sgd_to_lkr_rate, 2), sg_stock_portfolio_valuation))
     print("Total crypto portfolio value SG {:,} (SGD {:,})".
           format(round(crypto_portfolio_valuation * usd_to_lkr_rate, 2),
-                 round(crypto_portfolio_valuation*usd_to_sgd_rate, 2)))
+                 round(crypto_portfolio_valuation * usd_to_sgd_rate, 2)))
     print("Burrowing -{:,}".format(burrowing))
-    print("Total Liquid Assets as of now LK {:,}".format(total_liquid_assets_sl))
-    print("Total Liquid Assets as of now SG {:,}".format(sg_total_portfolio))
+    print("Total Liquid Assets as of now LK {:,} (SGD {:,})".format(total_liquid_assets_sl,
+                                                                    round(total_liquid_assets_sl / sgd_to_lkr_rate, 2)))
+    print("Total Liquid Assets as of now SG {:,} (SGD {:,})".format(sg_total_portfolio, sg_total_portfolio_in_sgd))
     print("Total Liquid Assets as of now {:,}".format(total_liquid_assets_sl + sg_total_portfolio))
     print("Total Assets as of now LK {:,}".format(total_assets_sl))
     print("Total Assets as of now SG {:,}".format(sg_total_portfolio))
@@ -597,11 +619,11 @@ def transform_data_file_in_to_dicts():
 
     if df['sgx_portfolio'] is not None:
         globals()['sgx_portfolio'] = df['sgx_portfolio'].to_dict('records')
-        preload_prices([item['symbol'] for item in globals()['sgx_portfolio']])
+        preload_prices([item['symbol'] for item in globals()['sgx_portfolio']], False, "SGD")
 
     if df['crypto_portfolio'] is not None:
         globals()['crypto_portfolio'] = df['crypto_portfolio'].to_dict('records')
-        preload_prices([item['symbol'] for item in globals()['crypto_portfolio']])
+        preload_prices([item['symbol'] for item in globals()['crypto_portfolio']], False, "USD")
 
     if df['trading_portfolio'] is not None:
         globals()['trading_portfolio'] = df['trading_portfolio'].to_dict('records')
