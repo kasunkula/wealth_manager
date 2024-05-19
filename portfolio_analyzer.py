@@ -38,14 +38,14 @@ last_recorded_prices = None
 real_estate_investment = 4950000.0
 lending = (0 + 0.0)
 sl_banks = (0 + 0)
-sg_banks = (4561.00 +  # poems
-            11.98 +  # gemini
-            75000.00 +  # dbs
-            0 +  # lending
-            8844.53 +  # Fidelity - current balance on 26 June 2023
-            (1114) +  # Fidelity - June
-            - 0  # sc cc loan
-            )  # in SGD
+sg_banks = round(105000.00 + 0 + 0 +  # uob + dbs
+                 5000 +  # lending
+                 22742.00 +  # Fidelity - current balance on 13 May 2024
+                 1141.05 +  # Fidelity - April
+                 850 * 4 +  # share scheme - April'24
+                 - 0  # sc cc loan
+                 , 2)
+
 burrowing = 0  # 1100000.0  # from Ama 1,000,000 + interest 100,000
 # ===========================================================================
 portfolio_target = 30000000.0  # EOY 2022 target
@@ -152,8 +152,8 @@ def get_last_traded_price(symbol, currency=None):
     yf.pdr_override()
     today = datetime.date.today()
     start_date = (today - datetime.timedelta(days=5)).strftime("%Y-%m-%d")
-    end_date = today.strftime("%Y-%m-%d")
-    print("get_data_yahoo from {0} to {1} for {2}".format(start_date, end_date, symbol))
+    end_date = (today + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+    # print("get_data_yahoo from {0} to {1} for {2}".format(start_date, end_date, symbol))
     df = pdr.get_data_yahoo(symbol, start=start_date, end=end_date, period='1d')
 
     if not df.empty:
@@ -173,11 +173,13 @@ def value_sg_portfolio():
     return round(portfolio_value, 2)
 
 
-def value_crypto_portfolio():
+def value_global_portfolio():
     portfolio_value = 0.0
-    for position in crypto_portfolio:
+    for position in global_portfolio:
         last_traded_price, currency = get_last_traded_price(position["symbol"])
-        portfolio_value += last_traded_price * position["qty"]
+        value = round(last_traded_price * position["qty"], 2)
+        portfolio_value += value
+        print("Global Portfolio {} : {}@{} = {} {}".format(position["symbol"], position["qty"], last_traded_price, value, currency))
     return round(portfolio_value, 2)
 
 
@@ -341,7 +343,7 @@ def get_ca_adjusted_position(symbol, traded_date, trade_qty, trade_price):
     return trade_qty, trade_price
 
 
-def compute_open_positions(symbol, print_pos=True):
+def compute_open_positions(symbol, print_pos=False):
     profit = 0
     cost = 0
     sales_proceed = 0
@@ -423,6 +425,7 @@ def analyse_portfolio():
     sgd_to_lkr_rate = get_exchange_rate("SGD", "LKR")
     usd_to_lkr_rate = get_exchange_rate("USD", "LKR")
     usd_to_sgd_rate = get_exchange_rate("USD", "SGD")
+    sgd_to_aud_rate = get_exchange_rate("SGD", "AUD")
     total_records = total_trades = total_deposits = total_withdrawals = total_turnover = current_cash_balance = 0
     last_recorded_prices = pickle.load(open("market_prices.pckl", "rb"))
     init()  # termcolor
@@ -503,7 +506,7 @@ def analyse_portfolio():
         if symbol in current_portfolio_cost_by_symbol:
             current_portfolio_total_cost += current_portfolio_cost_by_symbol[symbol]
     current_portfolio_total_sales_proceeds = round(current_portfolio_total_sales_proceeds, 2)
-    print_profits()
+    # print_profits()
     print("Total records scanned {}. Total trades {}".format(total_records, total_trades))
     print("Total Deposits on the market {}".format(total_deposits))
     print("Reinvesting deposits of earlier withdrawals {}".format(deposits_for_reinvesting_withdrawals))
@@ -555,32 +558,33 @@ def analyse_portfolio():
     print("Total Stock portfolio value {0}".format(total_stock_portfolio))
     print("=======================================================")
     sg_stock_portfolio_valuation = value_sg_portfolio()
-    crypto_portfolio_valuation = value_crypto_portfolio()
+    global_portfolio_valuation = value_global_portfolio()
     sg_total_portfolio_in_sgd = \
-        round(sg_banks + sg_stock_portfolio_valuation + crypto_portfolio_valuation * usd_to_sgd_rate, 0)
+        round(sg_banks + sg_stock_portfolio_valuation + global_portfolio_valuation * usd_to_sgd_rate, 0)
     sg_total_portfolio = round((sg_banks + sg_stock_portfolio_valuation) * sgd_to_lkr_rate
-                               + crypto_portfolio_valuation * usd_to_lkr_rate, 0)
+                               + global_portfolio_valuation * usd_to_lkr_rate, 0)
     total_liquid_assets_sl = round(total_stock_portfolio + sl_banks + lending - burrowing, 0)
     total_assets_sl = round(total_stock_portfolio + real_estate_investment + sl_banks + lending - burrowing, 0)
     total_assets_estimate = round(total_assets_sl + sg_total_portfolio, 0)
     total_liquid_assets_estimate = round(total_liquid_assets_sl + sg_total_portfolio, 0)
     print("=======================================================")
+    print("Exchange Rates : SGD-LKR={}, USD-LKR={}, USD-SGD={}, SGD-AUD={}".format(sgd_to_lkr_rate, usd_to_lkr_rate, usd_to_sgd_rate, sgd_to_aud_rate))
     print("Lending {:,}".format(lending))
     print("Real Estate {:,}".format(real_estate_investment))
     print("Cash at Bank SL {:,}".format(sl_banks))
-    print("Cash at Bank SG {:,} (SGD {:,})".format(round(sg_banks * sgd_to_lkr_rate, 2), sg_banks))
+    print("Cash at Bank SG {:,} (SGD {:,}) (AUD {:,})".format(round(sg_banks * sgd_to_lkr_rate, 2), sg_banks, round(sg_banks * sgd_to_aud_rate, 2)))
     print("Cash balance in CDS {}".format(cash_balance))
     print("Total Stock portfolio value SL {:,} (SGD {:,})".format(current_portfolio_total_sales_proceeds, round(
         current_portfolio_total_sales_proceeds / sgd_to_lkr_rate, 2)))
     print("Total Stock portfolio value SG {:,} (SGD {:,})".
           format(round(sg_stock_portfolio_valuation * sgd_to_lkr_rate, 2), sg_stock_portfolio_valuation))
-    print("Total crypto portfolio value SG {:,} (SGD {:,})".
-          format(round(crypto_portfolio_valuation * usd_to_lkr_rate, 2),
-                 round(crypto_portfolio_valuation * usd_to_sgd_rate, 2)))
+    print("Total global portfolio value SG {:,} (SGD {:,})".
+          format(round(global_portfolio_valuation * usd_to_lkr_rate, 2),
+                 round(global_portfolio_valuation * usd_to_sgd_rate, 2)))
     print("Burrowing -{:,}".format(burrowing))
     print("Total Liquid Assets as of now LK {:,} (SGD {:,})".format(total_liquid_assets_sl,
                                                                     round(total_liquid_assets_sl / sgd_to_lkr_rate, 2)))
-    print("Total Liquid Assets as of now SG {:,} (SGD {:,})".format(sg_total_portfolio, sg_total_portfolio_in_sgd))
+    print("Total Liquid Assets as of now SG {:,} (SGD {:,}) (AUD {:,})".format(sg_total_portfolio, sg_total_portfolio_in_sgd, round(sg_total_portfolio_in_sgd * sgd_to_aud_rate), 2))
     print("Total Liquid Assets as of now {:,}".format(total_liquid_assets_sl + sg_total_portfolio))
     print("Total Assets as of now LK {:,}".format(total_assets_sl))
     print("Total Assets as of now SG {:,}".format(sg_total_portfolio))
@@ -621,9 +625,9 @@ def transform_data_file_in_to_dicts():
         globals()['sgx_portfolio'] = df['sgx_portfolio'].to_dict('records')
         preload_prices([item['symbol'] for item in globals()['sgx_portfolio']], False, "SGD")
 
-    if df['crypto_portfolio'] is not None:
-        globals()['crypto_portfolio'] = df['crypto_portfolio'].to_dict('records')
-        preload_prices([item['symbol'] for item in globals()['crypto_portfolio']], False, "USD")
+    if df['global_portfolio'] is not None:
+        globals()['global_portfolio'] = df['global_portfolio'].to_dict('records')
+        preload_prices([item['symbol'] for item in globals()['global_portfolio']], False, "USD")
 
     if df['trading_portfolio'] is not None:
         globals()['trading_portfolio'] = df['trading_portfolio'].to_dict('records')
@@ -695,4 +699,4 @@ if __name__ == "__main__":
     transform_data_file_in_to_dicts()
     globals()['valuation_prices'] = {}
     analyse_portfolio()
-    render_portfolio_ui()
+    # render_portfolio_ui()
