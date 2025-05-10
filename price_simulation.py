@@ -7,7 +7,7 @@ from pandas_datareader import data as pdr
 from prettytable import PrettyTable
 
 symbols = ["BN4.SI", "S68.SI"]
-symbol = "S68.SI"
+symbol = "TSLA"
 start_date = "2024-01-01"
 starting_capital = 5000
 cut_loss_at = 7  # cut loss when when loss is %
@@ -15,7 +15,7 @@ take_profit_on = 15  # take profit when profit is %
 double_down_on_drop = 15
 buy_on_dip_from_last_high = 10  # buy when process falls % from last high
 take_profit_for = 100   # 7%
-buying_base_unit_value = 2500
+buying_base_unit_value = 1000
 # ===========================================
 accumulate_fraction = 50
 print_audit_trail = False
@@ -129,15 +129,17 @@ if not df.empty:
 
         if avg_price is not None and closing_price <= avg_price * (1 - cut_loss_at / 100):
             sell(symbol, row.name.date(), closing_price, "cut loss at {}%".format(cut_loss_at))
+            last_peak = closing_price
         elif closing_price <= last_buy_price * (1 - double_down_on_drop / 100):
             buy(symbol, row.name.date(), closing_price, None, "double down on dip of {}% from last buy price {}".format(double_down_on_drop, last_buy_price))
+            last_peak = closing_price
         elif closing_price < last_peak * (1 - buy_on_dip_from_last_high / 100):
             buy(symbol, row.name.date(), closing_price, buying_base_unit_value, "Dip of {}% from last peak {}".format(buy_on_dip_from_last_high, last_peak))
             last_peak = closing_price
         elif avg_price is not None and closing_price >= avg_price * (1 + take_profit_on / 100):
             sell(symbol, row.name.date(), closing_price, "on {}% gain".format(take_profit_on))
-        elif avg_price is not None and accumulate_fraction != 0 and avg_price >= closing_price:
-            buy(symbol, row.name.date(), closing_price, accumulate_fraction, "Accumulate")
+        # elif avg_price is not None and accumulate_fraction != 0 and avg_price >= closing_price:
+        #     buy(symbol, row.name.date(), closing_price, accumulate_fraction, "Accumulate")
         else:
             add_audit_trail_entry(symbol, row.name.date(), "None", "Idle", closing_price, 0, 0, 0)
             if print_audit_trail and show_idle_day_audit_trail:

@@ -1,5 +1,7 @@
 import csv
 import datetime
+import math
+import traceback
 
 import requests
 import json
@@ -15,12 +17,15 @@ from pandas_datareader import data as pdr
 ignore_on_behalf_investing = True
 mimic_real_timeline = True
 max_forecast_offsets = 1
-sgd_to_lkr_rate = 0
-usd_to_lkr_rate = 0
+
+# import pip
+# pip.main(["install", "openpyxl"])
 
 account_statement_file_names = [
     r"C:\Users\kasun\Google Drive\Documents\Finances\Portfolio Manager\Account Statement Sep EOM.csv",
     r"C:\Users\kasun\Google Drive\Documents\Finances\Portfolio Manager\Account Statement.csv"]
+
+account_statement_file_names = [r"C:\Users\kasun\Google Drive\Documents\Finances\Portfolio Manager\full_audit_trail.csv"]
 
 buy_trade_books = {}
 sell_trade_books = {}
@@ -33,29 +38,34 @@ portfolio_summary = []
 current_portfolio_cost_by_symbol = {}
 current_portfolio_sales_proceeds_by_symbol = {}
 last_recorded_prices = None
+current_sl_stock_portfolio_value = 11974168
 
 # ===========================================================================
 real_estate_investment = 4950000.0
 lending = (0 + 0.0)
 sl_banks = (0 + 0)
-sg_banks = round(105000.00 + 0 + 0 +  # uob + dbs
-                 5000 +  # lending
-                 22742.00 +  # Fidelity - current balance on 13 May 2024
-                 1141.05 +  # Fidelity - April
-                 850 * 4 +  # share scheme - April'24
-                 - 0  # sc cc loan
+sg_banks = round(193500.0 + 0 - 0 - 0 - 0 - 0 - 0 +  # uob + dbs - tax - citi cc - sc cc - sc load installment - expenses
+                 0 +  # lending
+                 38041.00 +  # fidelity
+                 0 +  # MANLIFE
+                 - (77000 - 2059 - 2387 * 6)  # sc cc loan 2059 paid on Nov 2024, December 2024 onwards 2387 each month
                  , 2)
 
 burrowing = 0  # 1100000.0  # from Ama 1,000,000 + interest 100,000
 # ===========================================================================
 portfolio_target = 30000000.0  # EOY 2022 target
-off_the_market_deposits = 2000000.00
+off_the_market_deposits = (2000000.00 +  # ASPH rights
+                           + 51250 +  # HBS IPO
+                           + 128000.00 +  # JKH rights
+                           - 4625000  # EXPO Delist
+                           )
 withdrawals = (2000000.0 + 500000.0)
 deposits_for_reinvesting_withdrawals = (400000 + 2285000)
 on_behalf_deposits = 1100100.0  # (100100.00 + 1000000.00) for Nisala 
 on_behalf_cash_balance = 0
 on_behalf_dividends_reinvested = 105045.00  # for Nisala
 recent_price_cache = {}
+exch_rate_cache = {}
 
 
 class Position:
@@ -116,16 +126,16 @@ def convert_symbol_to_yahoo_format(symbol):
     return '{}.CM'.format(symbol.replace('.', ''))
 
 
-def preload_prices(counters, convert_symbol, curr):
-    if curr is None:
-        curr = "LKR"
+def preload_prices(counters, convert_symbol, currencies):
+    index = 0
     for counter in counters:
         price, currency = \
-            get_last_traded_price(convert_symbol_to_yahoo_format(counter) if convert_symbol else counter, curr)
+            get_last_traded_price(convert_symbol_to_yahoo_format(counter) if convert_symbol else counter, currencies)
         recent_price_cache[counter] = {
             "price": price,
-            "currency": curr
+            "currency": currencies[index] if (currencies is not None and currencies[index] is not None) else "LKR"
         }
+        index = index + 1
 
 
 def get_cse_last_traded_price(counter):
@@ -146,16 +156,15 @@ def get_cse_last_traded_price(counter):
         exit(1)
 
 
-def get_last_traded_price(symbol, currency=None):
+def get_last_traded_price_old(symbol, currency=None):
     if symbol in recent_price_cache:
         return recent_price_cache[symbol]["price"], recent_price_cache[symbol]["currency"]
     yf.pdr_override()
     today = datetime.date.today()
-    start_date = (today - datetime.timedelta(days=5)).strftime("%Y-%m-%d")
+    start_date = (today - datetime.timedelta(days=10)).strftime("%Y-%m-%d")
     end_date = (today + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
-    # print("get_data_yahoo from {0} to {1} for {2}".format(start_date, end_date, symbol))
+    print("get_data_yahoo from {0} to {1} for {2}".format(start_date, end_date, symbol))
     df = pdr.get_data_yahoo(symbol, start=start_date, end=end_date, period='1d')
-
     if not df.empty:
         if currency is None:
             dq = pdr.get_quote_yahoo([symbol])
@@ -163,6 +172,21 @@ def get_last_traded_price(symbol, currency=None):
         print("Price read from Yahoo for {0} : {1} {2}".format(symbol, round(df.tail(1)['Close'][0], 2), currency))
         return round(df.tail(1)['Close'][0], 2), currency
     return 0, None
+
+
+def get_last_traded_price(symbol, currency=None):
+    if symbol in recent_price_cache:
+        return recent_price_cache[symbol]["price"], recent_price_cache[symbol]["currency"]
+    try:
+        stock = yf.Ticker(symbol)
+        last_price = stock.history(period="1d")['Close'].iloc[-1]
+        if currency is None:
+            currency = stock.info.get('currency', 'Unknown Currency')
+        return round(last_price, 2), currency
+    except:
+        traceback.print_exc()
+        print("exception in get_last_traded_price : {}".format(symbol))
+        return 0, None
 
 
 def value_sg_portfolio():
@@ -176,10 +200,14 @@ def value_sg_portfolio():
 def value_global_portfolio():
     portfolio_value = 0.0
     for position in global_portfolio:
-        last_traded_price, currency = get_last_traded_price(position["symbol"])
+        last_traded_price, currency = get_last_traded_price(position["symbol"], position["currency"])
         value = round(last_traded_price * position["qty"], 2)
+        converted_value = value
+        if currency != 'USD':
+            converted_value = value * get_exchange_rate(currency, "USD")
         portfolio_value += value
-        print("Global Portfolio {} : {}@{} = {} {}".format(position["symbol"], position["qty"], last_traded_price, value, currency))
+        print("Global Portfolio {} : {}@{} = {} {}{}".format(position["symbol"], position["qty"], last_traded_price, converted_value, 'USD',
+                                                             " {}{}".format(value, "USD") if currency != currency else ""))
     return round(portfolio_value, 2)
 
 
@@ -198,11 +226,18 @@ def get_valuation_price(counter):
     return valuation_prices[counter]
 
 
-def get_exchange_rate(from_currency, to_currency):
-    url = 'https://v6.exchangerate-api.com/v6/6248dad3f8ce10fad08ab9ba/latest/{}'.format(from_currency)
-    response = requests.get(url)
-    data = response.json()
-    return data["conversion_rates"][to_currency]
+def get_exchange_rate(from_currency, to_currency, verbose=True):
+    rate_display_name = "{}-{}".format(from_currency, to_currency)
+    if rate_display_name not in exch_rate_cache.keys():
+        url = 'https://v6.exchangerate-api.com/v6/6248dad3f8ce10fad08ab9ba/latest/{}'.format(from_currency)
+        response = requests.get(url)
+        data = response.json()
+        rate = data["conversion_rates"][to_currency]
+        if verbose:
+            print("get_exchange_rate from {} to {} : {}".format(from_currency, to_currency, rate))
+        exch_rate_cache[rate_display_name] = rate
+
+    return exch_rate_cache[rate_display_name]
 
 
 def get_cost(qty, price):
@@ -334,13 +369,30 @@ def print_trades(symbol):
 
 
 def get_ca_adjusted_position(symbol, traded_date, trade_qty, trade_price):
-    if symbol in splits:
-        trade_date = datetime.datetime.strptime(traded_date, '%d/%m/%Y')
-        split_date = datetime.datetime.strptime(splits[symbol]["date"], '%Y/%m/%d')
-        if trade_date < split_date:
-            trade_qty = round(trade_qty * splits[symbol]["ratio"], 0)
-            trade_price = round(trade_price / splits[symbol]["ratio"], 2)
-    return trade_qty, trade_price
+    try:
+        if symbol in splits:
+            trade_date = get_date(traded_date)
+            split_date = datetime.datetime.strptime(splits[symbol]["date"], '%Y/%m/%d')
+            if trade_date < split_date:
+                trade_qty = round(trade_qty * splits[symbol]["ratio"], 0)
+                trade_price = round(trade_price / splits[symbol]["ratio"], 2)
+        return trade_qty, trade_price
+    except:
+        print("get_ca_adjusted_position :{}[{}]".format(symbol, traded_date))
+        traceback.print_exc()
+        exit(1)
+
+
+def get_date(date_string):
+    date_formats = ["%d/%m/%Y", "%d/%m/%y", "%m/%d/%y", ]
+
+    for fmt in date_formats:
+        try:
+            return datetime.datetime.strptime(date_string, fmt)
+        except ValueError:
+            continue
+
+    raise ValueError(f"Date '{date_string}' does not match any expected format")
 
 
 def compute_open_positions(symbol, print_pos=False):
@@ -420,8 +472,81 @@ def get_non_on_behalf_trade_qty(symbol, side, price, qty, value):
     return non_onbehalf_trade_qty, non_onbehalf_trade_value
 
 
+def analyse_trading_audit_trail():
+    df = pd.read_excel(r'C:\Users\kasun\Google Drive\Documents\Finances\6aabca83.xlsx',
+                       sheet_name=None, engine='openpyxl')
+    transactions = []
+    total = 0
+    import re
+    pattern = r'^(Sale|Purchase) of .*?\(([^)]+)\)$'
+    for sheet_name, sheet in df.items():
+        if sheet_name == "Table 26":
+            continue
+        for row in sheet.to_dict('records'):
+            try:
+                if (isinstance(row['Type'], float) and math.isnan(row['Type'])) or (isinstance(row['Quantity'], int) and math.isnan(row['Quantity'])):
+                    continue
+                amount = float(str(row['Amount']).replace(",", "").replace(" Cr", ""))
+                balance = float(str(row['Cumulative Balance']).replace(",", "").replace(" Cr", ""))
+
+                match = re.search(pattern, row['Description'])
+                if match:
+                    action = match.group(1)
+                    code = match.group(2)
+                    desc = f"{action} of {code}"
+                else:
+                    desc = row['Description']
+                print(desc)
+                tx = {
+                    "Date": datetime.datetime.strptime(str(row['Transaction Date']), '%Y-%m-%d %H:%M:%S').strftime("%d/%m/%Y"),
+                    "Transaction Type": row['Type'],
+                    "Transaction Number": row['Doc Ref No'],
+                    "Transaction Particular": desc,
+                    "No. of Shares": float(str(row['Quantity']).replace(",", "").replace(" Cr", "")),
+                    "Price": row['Price'],
+                    "Amount": (-1 * amount) if "Cr" in str(row['Amount']) else amount,
+                    "Balance": (-1 * balance) if "Cr" in str(row['Cumulative Balance']) else balance,
+                }
+                transactions.append(tx)
+
+                tx_type = row['Type']
+                if tx_type == 'R':
+                    total = total + amount
+                    print("+ {} - {}({})".format(tx["Date"], amount, total))
+
+                if tx_type == 'PV':
+                    total = total - amount
+                    print("- {} - {}({})".format(tx["Date"], amount, total))
+
+            except:
+                print("failed to parse row sheet:{}[{}]".format(sheet_name, row))
+                traceback.print_exc()
+                exit(1)
+
+    print(len(transactions))
+    write_to_csf(transactions)
+
+
+def write_to_csf(transactions):
+    csv_file = r"C:\Users\kasun\Google Drive\Documents\Finances\full_audit_trail.csv"
+
+    # Define the field names based on the dictionary keys
+    fieldnames = ["Date", "Transaction Type", "Transaction Number", "Transaction Particular", "No. of Shares", "Price", "Amount", "Balance"]
+
+    # Write the list of dictionaries to the CSV
+    with open(csv_file, mode="w", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=fieldnames)
+
+        # Write the header row
+        writer.writeheader()
+
+        # Write each transaction dictionary to the CSV
+        for tx in transactions:
+            writer.writerow(tx)
+
+
 def analyse_portfolio():
-    global last_recorded_prices, sgd_to_lkr_rate, usd_to_lkr_rate
+    global last_recorded_prices
     sgd_to_lkr_rate = get_exchange_rate("SGD", "LKR")
     usd_to_lkr_rate = get_exchange_rate("USD", "LKR")
     usd_to_sgd_rate = get_exchange_rate("USD", "SGD")
@@ -473,19 +598,19 @@ def analyse_portfolio():
                 elif record[1] == "R":
                     total_deposits += abs(float(record[6].replace(',', '')))
                     print("{2} - Deposits on the market {0} ({1})".
-                          format(abs(float(record[6].replace(',', ''))), total_deposits - total_withdrawals, record[0]))
+                          format(abs(float(record[6].replace(',', ''))), round(total_deposits - total_withdrawals, 2), record[0]))
                     current_cash_balance = float(record[7].replace(',', ''))
                 elif record[1] == "PV":
                     total_withdrawals += abs(float(record[6].replace(',', '')))
                     current_cash_balance = float(record[7].replace(',', ''))
                     print("{2} - Withdrawal from the market {0} ({1})".
-                          format(abs(float(record[6].replace(',', ''))), total_deposits - total_withdrawals, record[0]))
+                          format(abs(float(record[6].replace(',', ''))), round(total_deposits - total_withdrawals, 2), record[0]))
                 else:
                     continue
                 if investment_start_date is None:
                     investment_start_date = datetime.datetime.strptime(record[0], '%d/%m/%Y')
     print("{} - off the market deposits {} ({})".
-          format('N/A', off_the_market_deposits, off_the_market_deposits + total_deposits - total_withdrawals, ))
+          format('N/A', off_the_market_deposits, round(off_the_market_deposits + total_deposits - total_withdrawals, 2), ))
     for trade in off_market_trades:
         qty, value = get_non_on_behalf_trade_qty(trade["symbol"], "B", trade["price"], trade["qty"], trade["value"])
         if qty <= 0:
@@ -498,7 +623,7 @@ def analyse_portfolio():
 
     current_portfolio_total_sales_proceeds = 0
     current_portfolio_total_cost = 0
-    preload_prices(list(buy_trade_books.keys()), True, "LKR")
+    # preload_prices(list(buy_trade_books.keys()), True, None)
     for symbol in sorted(buy_trade_books):
         compute_open_positions(symbol)
         if symbol in current_portfolio_sales_proceeds_by_symbol:
@@ -509,11 +634,14 @@ def analyse_portfolio():
     # print_profits()
     print("Total records scanned {}. Total trades {}".format(total_records, total_trades))
     print("Total Deposits on the market {}".format(total_deposits))
+    print("Total Withdarwals from the market {}".format(total_withdrawals))
+    print("Total Deposits/Withdarwals off the market {}".format(off_the_market_deposits))
+    print("Total generated Value from the market {}".format((total_withdrawals + current_sl_stock_portfolio_value) - (total_deposits + off_the_market_deposits)))
     print("Reinvesting deposits of earlier withdrawals {}".format(deposits_for_reinvesting_withdrawals))
     total_deposits -= deposits_for_reinvesting_withdrawals  # adjust the total deposits
     print("Adjusted total deposits on the market {}".format(total_deposits))
     print("Total Deposits off the market {}".format(off_the_market_deposits))
-    print("Total deposited capital".format(total_deposits + off_the_market_deposits))
+    print("Total deposited capital {}".format(total_deposits + off_the_market_deposits))
 
     if ignore_on_behalf_investing:
         total_deposited_capital_in_the_market = total_deposits - \
@@ -554,12 +682,12 @@ def analyse_portfolio():
     print("Investment Period  {0} - {1} to {2}".format(investment_period_in_days.days,
                                                        investment_start_date.strftime("%Y/%m/%d"),
                                                        investment_end_date.strftime("%Y/%m/%d")))
-    total_stock_portfolio = round(current_portfolio_total_sales_proceeds + cash_balance, 0)
+    total_stock_portfolio = round(current_portfolio_total_sales_proceeds if current_portfolio_total_sales_proceeds != 0.0 else current_sl_stock_portfolio_value + cash_balance, 0)
     print("Total Stock portfolio value {0}".format(total_stock_portfolio))
     print("=======================================================")
     sg_stock_portfolio_valuation = value_sg_portfolio()
     global_portfolio_valuation = value_global_portfolio()
-    sg_total_portfolio_in_sgd = \
+    overseas_total_portfolio_in_sgd = \
         round(sg_banks + sg_stock_portfolio_valuation + global_portfolio_valuation * usd_to_sgd_rate, 0)
     sg_total_portfolio = round((sg_banks + sg_stock_portfolio_valuation) * sgd_to_lkr_rate
                                + global_portfolio_valuation * usd_to_lkr_rate, 0)
@@ -572,20 +700,18 @@ def analyse_portfolio():
     print("Lending {:,}".format(lending))
     print("Real Estate {:,}".format(real_estate_investment))
     print("Cash at Bank SL {:,}".format(sl_banks))
-    print("Cash at Bank SG {:,} (SGD {:,}) (AUD {:,})".format(round(sg_banks * sgd_to_lkr_rate, 2), sg_banks, round(sg_banks * sgd_to_aud_rate, 2)))
     print("Cash balance in CDS {}".format(cash_balance))
     print("Total Stock portfolio value SL {:,} (SGD {:,})".format(current_portfolio_total_sales_proceeds, round(
         current_portfolio_total_sales_proceeds / sgd_to_lkr_rate, 2)))
-    print("Total Stock portfolio value SG {:,} (SGD {:,})".
-          format(round(sg_stock_portfolio_valuation * sgd_to_lkr_rate, 2), sg_stock_portfolio_valuation))
-    print("Total global portfolio value SG {:,} (SGD {:,})".
-          format(round(global_portfolio_valuation * usd_to_lkr_rate, 2),
-                 round(global_portfolio_valuation * usd_to_sgd_rate, 2)))
-    print("Burrowing -{:,}".format(burrowing))
     print("Total Liquid Assets as of now LK {:,} (SGD {:,})".format(total_liquid_assets_sl,
                                                                     round(total_liquid_assets_sl / sgd_to_lkr_rate, 2)))
-    print("Total Liquid Assets as of now SG {:,} (SGD {:,}) (AUD {:,})".format(sg_total_portfolio, sg_total_portfolio_in_sgd, round(sg_total_portfolio_in_sgd * sgd_to_aud_rate), 2))
-    print("Total Liquid Assets as of now {:,}".format(total_liquid_assets_sl + sg_total_portfolio))
+    print("SL Burrowing -{:,}".format(burrowing))
+
+    print("Cash at SG Bank {}".format(currency_value_to_text("SGD", sg_banks)))
+    print("Total SG Stock portfolio value {}".format(currency_value_to_text("SGD", sg_stock_portfolio_valuation)))
+    print("Total global portfolio value {}".format(currency_value_to_text("USD", global_portfolio_valuation)))
+    print("Total overseas Liquid Assets as of now {}".format(currency_value_to_text("SGD", overseas_total_portfolio_in_sgd)))
+    print("Total Liquid Assets as of now {}".format(currency_value_to_text("LKR", total_liquid_assets_sl + sg_total_portfolio)))
     print("Total Assets as of now LK {:,}".format(total_assets_sl))
     print("Total Assets as of now SG {:,}".format(sg_total_portfolio))
     print("Total Assets as of now {:,}".format(total_assets_sl + sg_total_portfolio))
@@ -603,6 +729,14 @@ def analyse_portfolio():
     print("Total Estimated EOY Liquid Assets {:,}".format(total_liquid_assets_estimate))
     print("=======================================================")
     pickle.dump(valuation_prices, open("market_prices.pckl", "wb"))
+
+
+def currency_value_to_text(currency, value):
+    return "{} {:,} - (LKR {:,} | USD {:,} | SGD {:,} | AUD {:,})".format(currency, value,
+                                                                          round(value * get_exchange_rate(currency, "LKR", False), 2),
+                                                                          round(value * get_exchange_rate(currency, "USD", False), 2),
+                                                                          round(value * get_exchange_rate(currency, "SGD", False), 2),
+                                                                          round(value * get_exchange_rate(currency, "AUD", False), 2))
 
 
 def transform_data_file_in_to_dicts():
@@ -623,11 +757,11 @@ def transform_data_file_in_to_dicts():
 
     if df['sgx_portfolio'] is not None:
         globals()['sgx_portfolio'] = df['sgx_portfolio'].to_dict('records')
-        preload_prices([item['symbol'] for item in globals()['sgx_portfolio']], False, "SGD")
+        preload_prices([item['symbol'] for item in globals()['sgx_portfolio']], False, [item['currency'] for item in globals()['sgx_portfolio']])
 
     if df['global_portfolio'] is not None:
         globals()['global_portfolio'] = df['global_portfolio'].to_dict('records')
-        preload_prices([item['symbol'] for item in globals()['global_portfolio']], False, "USD")
+        preload_prices([item['symbol'] for item in globals()['global_portfolio']], False, [item['currency'] for item in globals()['global_portfolio']])
 
     if df['trading_portfolio'] is not None:
         globals()['trading_portfolio'] = df['trading_portfolio'].to_dict('records')
@@ -695,7 +829,37 @@ def render_portfolio_ui():
     window.close()
 
 
+def get_price_from_cse_web():
+    import requests
+    from bs4 import BeautifulSoup
+
+    # URL of the stock profile page
+    url = "https://cse.lk/pages/company-profile/company-profile.component.html?symbol=LOFC.N0000"
+
+    # Fetch the HTML content of the page
+    response = requests.get(url)
+
+    # Check if request was successful
+    if response.status_code == 200:
+        # Parse the HTML content
+        soup = BeautifulSoup(response.content, "html.parser")
+
+        # Inspect the page to find the tag containing the stock price
+        # Assume the price is in a span with class 'stock-price'
+        price_tag = soup.find("span", class_="stock-price")  # Adjust this selector based on actual HTML
+
+        if price_tag:
+            stock_price = price_tag.get_text(strip=True)
+            print(f"Stock Price: {stock_price}")
+        else:
+            print("Stock price not found on the page.")
+    else:
+        print("Failed to retrieve the page. Status code:", response.status_code)
+
+
 if __name__ == "__main__":
+    # get_price_from_cse_web()
+    # analyse_trading_audit_trail()
     transform_data_file_in_to_dicts()
     globals()['valuation_prices'] = {}
     analyse_portfolio()
